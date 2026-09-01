@@ -1,4 +1,4 @@
-name: Build Void Glass Launcher APK
+name: Build VoidGlass Launcher APK
 
 on:
   push:
@@ -25,31 +25,44 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          echo "Mencari ZIP project..."
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP project tidak dijumpai."
+            exit 1
+          fi
+
+          echo "ZIP dijumpai: $ZIP_FILE"
+
+          mkdir -p extracted
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo "Kandungan selepas extract:"
+          find extracted -maxdepth 4 -type f | head -100
+
       - name: Find Android project
         shell: bash
         run: |
           set -e
 
-          echo "Searching for Gradle project..."
-
-          if [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ]; then
-            echo "Project found in root."
-            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          PROJECT_DIR=$(find . -type f \( \
-            -name "settings.gradle" -o \
-            -name "settings.gradle.kts" \
-          \) -not -path "./.git/*" \
-          | head -n 1 | xargs -r dirname)
+          PROJECT_DIR=$(find extracted -type f -name "settings.gradle*" -o -name "build.gradle*" | \
+            sed 's#/[^/]*$##' | head -n 1)
 
           if [ -z "$PROJECT_DIR" ]; then
             echo "ERROR: Android Gradle project tidak dijumpai."
+            echo "Semua fail:"
+            find extracted -maxdepth 5 -type f
             exit 1
           fi
 
-          echo "Project found: $PROJECT_DIR"
+          echo "Project dijumpai di: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
@@ -58,21 +71,33 @@ jobs:
           set -e
           cd "$PROJECT_DIR"
 
-          echo "Building project..."
-          gradle --no-daemon clean assembleDebug
+          chmod +x gradlew 2>/dev/null || true
+
+          if [ -f "./gradlew" ]; then
+            ./gradlew clean assembleDebug --no-daemon
+          else
+            gradle clean assembleDebug --no-daemon
+          fi
 
       - name: Find APK
         shell: bash
         run: |
           set -e
 
-          echo "Searching for APK..."
-          find "$PROJECT_DIR" -type f -name "*.apk" -print
+          echo "Mencari APK..."
+
+          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK tidak dihasilkan."
+            exit 1
+          fi
+
+          echo "APK dijumpai: $APK"
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VoidGlassLauncher-APK
-          path: |
-            **/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          path: ${{ env.APK_PATH }}
