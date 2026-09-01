@@ -2,7 +2,8 @@ name: Build Void Glass Launcher APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -13,55 +14,65 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract Void Glass project
-        shell: bash
-        run: |
-          set -e
-
-          ZIP="$(find . -maxdepth 2 -type f \( \
-            -name 'VoidGlassLauncherPremium_RedmiA3*.zip' -o \
-            -name 'VoidGlassPremium_DeX_Lite_RedmiA3*.zip' -o \
-            -name 'VoidGlassLauncher*.zip' \
-          \) -print -quit)"
-
-          if [ -z "$ZIP" ]; then
-            echo "ZIP project tidak dijumpai."
-            exit 1
-          fi
-
-          rm -rf project
-          mkdir project
-          unzip -q "$ZIP" -d project
-
-          ROOT="$(find project -mindepth 1 -maxdepth 1 -type d -print -quit)"
-
-          if [ -n "$ROOT" ]; then
-            shopt -s dotglob
-            cp -a "$ROOT"/. project/
-            rm -rf "$ROOT"
-          fi
-
-          echo "Project files:"
-          find project -maxdepth 3 -type f | sort
-
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.9'
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for Gradle project..."
+
+          if [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ]; then
+            echo "Project found in root."
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          PROJECT_DIR=$(find . -type f \( \
+            -name "settings.gradle" -o \
+            -name "settings.gradle.kts" \
+          \) -not -path "./.git/*" \
+          | head -n 1 | xargs -r dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android Gradle project tidak dijumpai."
+            exit 1
+          fi
+
+          echo "Project found: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
-        working-directory: project
-        run: gradle --no-daemon clean assembleDebug
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          echo "Building project..."
+          gradle --no-daemon clean assembleDebug
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK..."
+          find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VoidGlassLauncher-APK
-          path: project/app/build/outputs/apk/debug/*.apk
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
